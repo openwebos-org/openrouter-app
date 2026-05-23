@@ -5,11 +5,20 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 
-<meta name="app-name" content="OpenRouter Voice AI">
-<meta name="app-version" content="7.0">
-<meta name="app-icon" content="🎤">
+<meta name="app-name" content="OpenRouter AI">
+<meta name="app-version" content="8.5">
+<meta name="app-icon" content="🧠">
 
-<title>OpenRouter AI Voice</title>
+<title>OpenRouter AI</title>
+
+<!-- MATERIALIZE -->
+<link rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/css/materialize.min.css">
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/materialize/1.0.0/js/materialize.min.js"></script>
+
+<!-- GOOGLE ICONS -->
+<link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
 
 <style>
 
@@ -17,16 +26,42 @@ body{
     margin:0;
     height:100vh;
     display:flex;
-    font-family:Roboto;
     background:#0f0f1f;
     color:white;
+    overflow:hidden;
 }
 
+/* SIDEBAR */
+
 .sidebar{
-    width:260px;
+    width:300px;
     background:#15152a;
     border-right:1px solid #2a2a40;
+    display:flex;
+    flex-direction:column;
 }
+
+.topbar{
+    padding:10px;
+    border-bottom:1px solid #2a2a40;
+}
+
+.chat-list{
+    flex:1;
+    overflow:auto;
+}
+
+.chat-item{
+    padding:12px;
+    border-bottom:1px solid #222;
+    cursor:pointer;
+}
+
+.chat-item:hover{
+    background:#222244;
+}
+
+/* MAIN */
 
 .main{
     flex:1;
@@ -34,57 +69,62 @@ body{
     flex-direction:column;
 }
 
+/* CHAT */
+
 .chat{
     flex:1;
     overflow:auto;
-    padding:12px;
+    padding:16px;
     display:flex;
     flex-direction:column;
-    gap:10px;
+    gap:12px;
 }
 
 .msg{
-    padding:10px;
-    border-radius:12px;
+    padding:12px;
+    border-radius:16px;
     max-width:75%;
     white-space:pre-wrap;
 }
 
-.user{background:#2962ff;align-self:flex-end;}
-.bot{background:#222;}
+.user{
+    background:#2962ff;
+    align-self:flex-end;
+}
+
+.bot{
+    background:#1f1f35;
+}
+
+/* BOTTOM */
 
 .bottom{
-    display:flex;
     padding:10px;
-    gap:10px;
     border-top:1px solid #2a2a40;
+    display:flex;
+    gap:10px;
     align-items:center;
 }
 
-input{
+.input-field{
     flex:1;
-    padding:10px;
-    border:none;
-    border-radius:8px;
+    margin:0 !important;
+}
+
+textarea{
+    color:white !important;
+}
+
+.select-dropdown{
+    color:white !important;
+}
+
+.dropdown-content{
     background:#1f1f35;
-    color:white;
 }
 
-button{
-    background:#2962ff;
-    border:none;
-    color:white;
-    padding:10px 12px;
-    border-radius:8px;
-    cursor:pointer;
-}
-
-.voice-btn{
-    background:#00c853;
-}
-
-.recording{
-    background:#ff1744 !important;
+.dropdown-content li span{
+    color:white !important;
 }
 
 </style>
@@ -93,25 +133,84 @@ button{
 
 <body>
 
+<!-- SIDEBAR -->
+
 <div class="sidebar">
-    <button onclick="newChat()">+ Chat</button>
+
+<div class="topbar">
+
+<a class="waves-effect waves-light btn blue"
+onclick="newChat()">
+<i class="material-icons left">add</i>
+Chat
+</a>
+
+<br><br>
+
+<!-- MODEL SEARCH -->
+
+<div class="input-field">
+
+<input
+id="modelSearch"
+type="text"
+placeholder="Search model..."
+oninput="filterModels()">
+
 </div>
+
+<!-- MODEL SELECTOR -->
+
+<div class="input-field">
+
+<select id="modelSelect"></select>
+
+</div>
+
+</div>
+
+<!-- CHAT LIST -->
+
+<div id="chatList" class="chat-list"></div>
+
+</div>
+
+<!-- MAIN -->
 
 <div class="main">
 
+<!-- CHAT -->
+
 <div id="chat" class="chat"></div>
+
+<!-- INPUT -->
 
 <div class="bottom">
 
-<button id="voiceBtn" class="voice-btn" onclick="toggleVoice()">
+<a class="btn green"
+id="voiceBtn"
+onclick="toggleVoice()">
 🎤
-</button>
+</a>
 
-<input id="input" placeholder="Type or speak..." onkeydown="if(event.key==='Enter') send()">
+<div class="input-field">
 
-<button onclick="send()">Send</button>
+<textarea
+id="input"
+class="materialize-textarea"
+placeholder="Message..."
+onkeydown="handleKey(event)">
+</textarea>
 
-<button onclick="speakLast()">🔊</button>
+</div>
+
+<a class="btn blue" onclick="send()">
+Send
+</a>
+
+<a class="btn orange" onclick="speakLast()">
+🔊
+</a>
 
 </div>
 
@@ -119,126 +218,174 @@ button{
 
 <script>
 
-const WORKER = "https://YOUR-WORKER.workers.dev";
+/* ================= CONFIG ================= */
 
-let recognition;
-let listening = false;
+const WORKER =
+"https://ai.thcorporation8.workers.dev";
+
+/* ================= STATE ================= */
 
 let chats = {};
-let current = "default";
+let current = null;
+let models = [];
 
-chats[current] = {messages:[]};
+/* ================= INIT ================= */
 
-/* ================= SPEECH TO TEXT ================= */
+document.addEventListener("DOMContentLoaded", async()=>{
 
-function initSpeech(){
+    M.AutoInit();
 
-    const SpeechRecognition =
-        window.SpeechRecognition ||
-        window.webkitSpeechRecognition;
+    await loadModels();
 
-    if(!SpeechRecognition){
-        alert("Speech not supported in this browser");
-        return;
-    }
+    newChat();
 
-    recognition = new SpeechRecognition();
+});
 
-    recognition.continuous = false;
+/* ================= MODELS ================= */
 
-    recognition.lang = "en-US";
+async function loadModels(){
 
-    recognition.onresult = (e)=>{
+    try{
 
-        const text = e.results[0][0].transcript;
+        const res = await fetch(WORKER);
 
-        document.getElementById("input").value = text;
+        models = await res.json();
 
-        send();
+        renderModels(models);
 
-    };
+    }catch(e){
 
-    recognition.onend = ()=>{
+        console.error(e);
 
-        listening = false;
-
-        document.getElementById("voiceBtn")
-        .classList.remove("recording");
-
-    };
-
-}
-
-/* ================= TOGGLE VOICE ================= */
-
-function toggleVoice(){
-
-    if(!recognition) initSpeech();
-
-    if(!recognition) return;
-
-    if(!listening){
-
-        recognition.start();
-
-        listening = true;
-
-        document.getElementById("voiceBtn")
-        .classList.add("recording");
-
-    }else{
-
-        recognition.stop();
-
-        listening = false;
+        M.toast({
+            html:"Failed to load models"
+        });
 
     }
 
 }
 
-/* ================= TEXT TO SPEECH ================= */
+function renderModels(list){
 
-function speak(text){
+    const select =
+        document.getElementById("modelSelect");
 
-    if(!text) return;
+    select.innerHTML = "";
 
-    const utter = new SpeechSynthesisUtterance(text);
+    list.forEach(m=>{
 
-    utter.lang = "en-US";
+        const option =
+            document.createElement("option");
 
-    utter.rate = 1;
+        option.value = m.id;
 
-    speechSynthesis.speak(utter);
+        option.textContent = m.id;
 
-}
+        select.appendChild(option);
 
-function speakLast(){
+    });
 
-    const last = chats[current].messages
-        .slice()
-        .reverse()
-        .find(m=>m.role==="bot");
-
-    if(last) speak(last.text);
+    M.FormSelect.init(select);
 
 }
 
-/* ================= UI ================= */
+function filterModels(){
+
+    const q =
+        document.getElementById("modelSearch")
+        .value
+        .toLowerCase();
+
+    const filtered = models.filter(m=>
+        m.id.toLowerCase().includes(q)
+    );
+
+    renderModels(filtered);
+
+}
+
+/* ================= CHAT ================= */
+
+function newChat(){
+
+    const id = "chat_" + Date.now();
+
+    chats[id] = {
+        id,
+        name:"New Chat",
+        messages:[]
+    };
+
+    current = id;
+
+    renderChats();
+
+    renderChat();
+
+}
+
+function renderChats(){
+
+    const list =
+        document.getElementById("chatList");
+
+    list.innerHTML = "";
+
+    Object.values(chats).forEach(c=>{
+
+        const div =
+            document.createElement("div");
+
+        div.className = "chat-item";
+
+        div.innerHTML = `
+            <b>${c.name}</b>
+        `;
+
+        div.onclick=()=>{
+            current=c.id;
+            renderChat();
+        };
+
+        list.appendChild(div);
+
+    });
+
+}
+
+function renderChat(){
+
+    const chat =
+        document.getElementById("chat");
+
+    chat.innerHTML = "";
+
+    chats[current].messages.forEach(m=>{
+
+        const div =
+            document.createElement("div");
+
+        div.className =
+            "msg " + m.role;
+
+        div.textContent =
+            m.text;
+
+        chat.appendChild(div);
+
+    });
+
+}
+
+/* ================= ADD ================= */
 
 function add(role,text){
 
-    chats[current].messages.push({role,text});
+    chats[current].messages.push({
+        role,text
+    });
 
-    const div = document.createElement("div");
-
-    div.className="msg "+role;
-
-    div.textContent=text;
-
-    document.getElementById("chat").appendChild(div);
-
-    document.getElementById("chat").scrollTop =
-        document.getElementById("chat").scrollHeight;
+    renderChat();
 
 }
 
@@ -246,9 +393,11 @@ function add(role,text){
 
 async function send(){
 
-    const input=document.getElementById("input");
+    const input =
+        document.getElementById("input");
 
-    const text=input.value.trim();
+    const text =
+        input.value.trim();
 
     if(!text) return;
 
@@ -256,44 +405,66 @@ async function send(){
 
     add("user",text);
 
-    const bot=document.createElement("div");
+    const chat =
+        document.getElementById("chat");
+
+    const bot =
+        document.createElement("div");
 
     bot.className="msg bot";
 
-    bot.textContent="...";
+    bot.textContent="";
 
-    document.getElementById("chat").appendChild(bot);
+    chat.appendChild(bot);
 
-    const messages = chats[current].messages.map(m=>({
-        role:m.role,
-        content:m.text
-    }));
+    const model =
+        document.getElementById("modelSelect")
+        .value;
+
+    const messages =
+        chats[current].messages.map(m=>({
+            role:m.role,
+            content:m.text
+        }));
 
     const res = await fetch(WORKER,{
+
         method:"POST",
-        headers:{"Content-Type":"application/json"},
+
+        headers:{
+            "Content-Type":"application/json"
+        },
+
         body:JSON.stringify({
-            model:"openai/gpt-4o-mini",
+            model,
             messages
         })
+
     });
 
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
+    const reader =
+        res.body.getReader();
 
-    let buffer = "";
+    const decoder =
+        new TextDecoder();
 
-    let fullText = "";
+    let buffer="";
+    let full="";
 
     while(true){
 
-        const {value,done} = await reader.read();
+        const {value,done} =
+            await reader.read();
 
         if(done) break;
 
-        buffer += decoder.decode(value,{stream:true});
+        buffer += decoder.decode(
+            value,
+            {stream:true}
+        );
 
-        const lines = buffer.split("\n");
+        const lines =
+            buffer.split("\n");
 
         buffer = lines.pop();
 
@@ -301,26 +472,30 @@ async function send(){
 
             if(line.startsWith("data:")){
 
-                const json = line.replace("data:","").trim();
+                const json =
+                    line.replace("data:","")
+                    .trim();
 
-                if(json==="[DONE]") continue;
+                if(json==="[DONE]")
+                    continue;
 
                 try{
 
-                    const parsed = JSON.parse(json);
+                    const parsed =
+                        JSON.parse(json);
 
                     const token =
-                        parsed.choices?.[0]?.delta?.content;
+                        parsed.choices?.[0]
+                        ?.delta?.content;
 
                     if(token){
 
-                        bot.textContent += token;
+                        full += token;
 
-                        fullText += token;
+                        bot.textContent = full;
 
-                        document.getElementById("chat")
-                        .scrollTop =
-                        document.getElementById("chat").scrollHeight;
+                        chat.scrollTop =
+                            chat.scrollHeight;
 
                     }
 
@@ -332,17 +507,119 @@ async function send(){
 
     }
 
-    chats[current].messages.push({
-        role:"bot",
-        text:fullText
-    });
+    add("bot",full);
 
 }
 
-/* ================= INIT ================= */
+/* ================= KEY ================= */
 
-function newChat(){
-    current = "default";
+function handleKey(e){
+
+    if(e.key==="Enter" && !e.shiftKey){
+
+        e.preventDefault();
+
+        send();
+
+    }
+
+}
+
+/* ================= VOICE ================= */
+
+let recognition;
+let listening=false;
+
+function initVoice(){
+
+    const SR =
+        window.SpeechRecognition ||
+        window.webkitSpeechRecognition;
+
+    if(!SR){
+
+        M.toast({
+            html:"Speech unsupported"
+        });
+
+        return;
+
+    }
+
+    recognition = new SR();
+
+    recognition.lang="en-US";
+
+    recognition.onresult=(e)=>{
+
+        document.getElementById("input")
+        .value =
+        e.results[0][0].transcript;
+
+        send();
+
+    };
+
+    recognition.onend=()=>{
+
+        listening=false;
+
+        document.getElementById("voiceBtn")
+        .classList.remove("red");
+
+    };
+
+}
+
+function toggleVoice(){
+
+    if(!recognition)
+        initVoice();
+
+    if(!recognition)
+        return;
+
+    if(!listening){
+
+        recognition.start();
+
+        listening=true;
+
+        document.getElementById("voiceBtn")
+        .classList.add("red");
+
+    }else{
+
+        recognition.stop();
+
+    }
+
+}
+
+/* ================= TTS ================= */
+
+function speak(text){
+
+    const u =
+        new SpeechSynthesisUtterance(text);
+
+    u.lang="en-US";
+
+    speechSynthesis.speak(u);
+
+}
+
+function speakLast(){
+
+    const last =
+        chats[current].messages
+        .slice()
+        .reverse()
+        .find(m=>m.role==="bot");
+
+    if(last)
+        speak(last.text);
+
 }
 
 </script>
