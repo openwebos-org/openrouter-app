@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+
+<meta name="app-name" content="OpenRouter Voice AI">
+<meta name="app-version" content="7.0">
+<meta name="app-icon" content="🎤">
+
+<title>OpenRouter AI Voice</title>
+
+<style>
+
+body{
+    margin:0;
+    height:100vh;
+    display:flex;
+    font-family:Roboto;
+    background:#0f0f1f;
+    color:white;
+}
+
+.sidebar{
+    width:260px;
+    background:#15152a;
+    border-right:1px solid #2a2a40;
+}
+
+.main{
+    flex:1;
+    display:flex;
+    flex-direction:column;
+}
+
+.chat{
+    flex:1;
+    overflow:auto;
+    padding:12px;
+    display:flex;
+    flex-direction:column;
+    gap:10px;
+}
+
+.msg{
+    padding:10px;
+    border-radius:12px;
+    max-width:75%;
+    white-space:pre-wrap;
+}
+
+.user{background:#2962ff;align-self:flex-end;}
+.bot{background:#222;}
+
+.bottom{
+    display:flex;
+    padding:10px;
+    gap:10px;
+    border-top:1px solid #2a2a40;
+    align-items:center;
+}
+
+input{
+    flex:1;
+    padding:10px;
+    border:none;
+    border-radius:8px;
+    background:#1f1f35;
+    color:white;
+}
+
+button{
+    background:#2962ff;
+    border:none;
+    color:white;
+    padding:10px 12px;
+    border-radius:8px;
+    cursor:pointer;
+}
+
+.voice-btn{
+    background:#00c853;
+}
+
+.recording{
+    background:#ff1744 !important;
+}
+
+</style>
+
+</head>
+
+<body>
+
+<div class="sidebar">
+    <button onclick="newChat()">+ Chat</button>
+</div>
+
+<div class="main">
+
+<div id="chat" class="chat"></div>
+
+<div class="bottom">
+
+<button id="voiceBtn" class="voice-btn" onclick="toggleVoice()">
+🎤
+</button>
+
+<input id="input" placeholder="Type or speak..." onkeydown="if(event.key==='Enter') send()">
+
+<button onclick="send()">Send</button>
+
+<button onclick="speakLast()">🔊</button>
+
+</div>
+
+</div>
+
+<script>
+
+const WORKER = "https://YOUR-WORKER.workers.dev";
+
+let recognition;
+let listening = false;
+
+let chats = {};
+let current = "default";
+
+chats[current] = {messages:[]};
+
+/* ================= SPEECH TO TEXT ================= */
+
+function initSpeech(){
+
+    const SpeechRecognition =
+        window.SpeechRecognition ||
+        window.webkitSpeechRecognition;
+
+    if(!SpeechRecognition){
+        alert("Speech not supported in this browser");
+        return;
+    }
+
+    recognition = new SpeechRecognition();
+
+    recognition.continuous = false;
+
+    recognition.lang = "en-US";
+
+    recognition.onresult = (e)=>{
+
+        const text = e.results[0][0].transcript;
+
+        document.getElementById("input").value = text;
+
+        send();
+
+    };
+
+    recognition.onend = ()=>{
+
+        listening = false;
+
+        document.getElementById("voiceBtn")
+        .classList.remove("recording");
+
+    };
+
+}
+
+/* ================= TOGGLE VOICE ================= */
+
+function toggleVoice(){
+
+    if(!recognition) initSpeech();
+
+    if(!recognition) return;
+
+    if(!listening){
+
+        recognition.start();
+
+        listening = true;
+
+        document.getElementById("voiceBtn")
+        .classList.add("recording");
+
+    }else{
+
+        recognition.stop();
+
+        listening = false;
+
+    }
+
+}
+
+/* ================= TEXT TO SPEECH ================= */
+
+function speak(text){
+
+    if(!text) return;
+
+    const utter = new SpeechSynthesisUtterance(text);
+
+    utter.lang = "en-US";
+
+    utter.rate = 1;
+
+    speechSynthesis.speak(utter);
+
+}
+
+function speakLast(){
+
+    const last = chats[current].messages
+        .slice()
+        .reverse()
+        .find(m=>m.role==="bot");
+
+    if(last) speak(last.text);
+
+}
+
+/* ================= UI ================= */
+
+function add(role,text){
+
+    chats[current].messages.push({role,text});
+
+    const div = document.createElement("div");
+
+    div.className="msg "+role;
+
+    div.textContent=text;
+
+    document.getElementById("chat").appendChild(div);
+
+    document.getElementById("chat").scrollTop =
+        document.getElementById("chat").scrollHeight;
+
+}
+
+/* ================= SEND ================= */
+
+async function send(){
+
+    const input=document.getElementById("input");
+
+    const text=input.value.trim();
+
+    if(!text) return;
+
+    input.value="";
+
+    add("user",text);
+
+    const bot=document.createElement("div");
+
+    bot.className="msg bot";
+
+    bot.textContent="...";
+
+    document.getElementById("chat").appendChild(bot);
+
+    const messages = chats[current].messages.map(m=>({
+        role:m.role,
+        content:m.text
+    }));
+
+    const res = await fetch(WORKER,{
+        method:"POST",
+        headers:{"Content-Type":"application/json"},
+        body:JSON.stringify({
+            model:"openai/gpt-4o-mini",
+            messages
+        })
+    });
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+
+    let buffer = "";
+
+    let fullText = "";
+
+    while(true){
+
+        const {value,done} = await reader.read();
+
+        if(done) break;
+
+        buffer += decoder.decode(value,{stream:true});
+
+        const lines = buffer.split("\n");
+
+        buffer = lines.pop();
+
+        for(const line of lines){
+
+            if(line.startsWith("data:")){
+
+                const json = line.replace("data:","").trim();
+
+                if(json==="[DONE]") continue;
+
+                try{
+
+                    const parsed = JSON.parse(json);
+
+                    const token =
+                        parsed.choices?.[0]?.delta?.content;
+
+                    if(token){
+
+                        bot.textContent += token;
+
+                        fullText += token;
+
+                        document.getElementById("chat")
+                        .scrollTop =
+                        document.getElementById("chat").scrollHeight;
+
+                    }
+
+                }catch(e){}
+
+            }
+
+        }
+
+    }
+
+    chats[current].messages.push({
+        role:"bot",
+        text:fullText
+    });
+
+}
+
+/* ================= INIT ================= */
+
+function newChat(){
+    current = "default";
+}
+
+</script>
+
+</body>
+</html>
